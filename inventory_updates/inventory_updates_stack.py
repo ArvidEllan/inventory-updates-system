@@ -81,6 +81,28 @@ class InventoryUpdatesSystemStack(Stack):
         )
         queue.queue_policy = iam.PolicyDocument(statements=[policy])
         Tags.of(queue).add("department", "inventory")
+       # Create the DynamoDB table
+        table = dynamodb.Table(self, 'InventoryUpdates',
+            table_name="InventoryUpdates",
+            partition_key=dynamodb.Attribute(name='PK', type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name='SK', type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.DESTROY
+        )
+        
+        # Create a global secondary index
+        table.add_global_secondary_index(
+            index_name="product-index",
+            partition_key=dynamodb.Attribute(name='GSI1_PK', type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name='GSI1_SK', type=dynamodb.AttributeType.STRING)
+        )
+        
+        table.add_global_secondary_index(
+            index_name="user-index",
+            partition_key=dynamodb.Attribute(name='GSI2_PK', type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name='GSI2_SK', type=dynamodb.AttributeType.STRING)
+        )
+        Tags.of(table).add("department", "inventory")
 
 
 
