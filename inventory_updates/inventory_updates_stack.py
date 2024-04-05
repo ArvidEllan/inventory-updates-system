@@ -25,15 +25,43 @@ from aws_cdk.aws_lambda import Function, Tracing
 
 class InventoryUpdatesSystemStack(Stack):
 
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+  def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # The code that defines your stack goes here
+        # Create a role for the Lambda function
+        role = iam.Role(
+            self, "InventoryFunctionRole",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            role_name="InventoryFunctionRole",
+            description="Role for Lambda functions"
+        )
+        Tags.of(role).add("department", "inventory")
 
-        # example resource
-        # queue = sqs.Queue(
-        #     self, "InventoryUpdatesSystemQueue",
-        #     visibility_timeout=Duration.seconds(300),
-        # )
+        # Allow the Lambda function to write to CloudWatch Logs
+        role.add_to_policy(iam.PolicyStatement(
+            actions=["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+            resources=["arn:aws:logs:*:*:*"]
+        ))
+      # Create the Dead Letter Queue (DLQ)
+        dlq = sqs.Queue(self, 'InventoryUpdatesDlq',
+            visibility_timeout=Duration.seconds(300)
+        )
+        Tags.of(dlq).add("department", "inventory")
+        
+        # Create the cognito userpool
+        
+        user_pool = cognito.UserPool(self, "UserPool",
+                                     user_pool_name="well-architect-user-pool",
+                                     self_sign_up_enabled=True,
+                                     sign_in_aliases=cognito.SignInAliases(email=True),
+                                     standard_attributes=cognito.StandardAttributes(
+                                         email=cognito.StandardAttribute(mutable=True, required=True)
+                                     )
+                                     )
+        cognito.UserPoolClient(self, "UserPoolClient", user_pool=user_pool)
+        auth = apigw.CognitoUserPoolsAuthorizer(self, "Authorizer", cognito_user_pools=[user_pool] )
+
+
+    
 
         
