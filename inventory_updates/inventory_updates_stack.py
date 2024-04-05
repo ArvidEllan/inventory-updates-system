@@ -60,6 +60,28 @@ class InventoryUpdatesSystemStack(Stack):
                                      )
         cognito.UserPoolClient(self, "UserPoolClient", user_pool=user_pool)
         auth = apigw.CognitoUserPoolsAuthorizer(self, "Authorizer", cognito_user_pools=[user_pool] )
+        # Create the SQS queue with DLQ setting
+        queue = sqs.Queue(
+            self, "InventoryUpdatesQueue",
+            visibility_timeout=Duration.seconds(300),
+            encryption=sqs.QueueEncryption.KMS_MANAGED,
+            removal_policy=RemovalPolicy.DESTROY,
+            dead_letter_queue=sqs.DeadLetterQueue(
+                max_receive_count=2,  # Number of retries before sending the message to the DLQ
+                queue=dlq
+            )
+        )
+
+        # Create an SQS queue policy to allow source queue to send messages to the DLQ
+        policy = iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=["sqs:SendMessage"],
+            resources=[dlq.queue_arn],
+            conditions={"ArnEquals": {"aws:SourceArn": queue.queue_arn}},
+        )
+        queue.queue_policy = iam.PolicyDocument(statements=[policy])
+        Tags.of(queue).add("department", "inventory")
+
 
 
     
