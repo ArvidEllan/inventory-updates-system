@@ -1,0 +1,176 @@
+{
+    "Comment": "order processing",
+    "StartAt": "Get Order details",
+    "States": {
+      "Get Order details": {
+        "Type": "Pass",
+        "Parameters":{
+          "payload.$": "$.StatePayload.body",
+          "key.$": "$.StatePayload.key"
+        },
+        "ResultPath": "$.order_info",
+        "OutputPath": "$.order_info",
+        "Next": "Validate Items"
+      },
+      "Validate Items": {
+        "Type": "Map",
+        "ItemsPath": "$.payload.items",
+        "ResultPath": "$.payload.order.item",
+        "Iterator": {
+          "StartAt": "check inventory",
+          "States": {
+            "check inventory": {
+              "Type": "Task",
+              "Parameters": {
+                  "TableName": "InventoryUpdates",
+                  "IndexName": "product-index",
+                  "KeyConditionExpression": "GSI1_PK = :gsi1_pk AND begins_with(GSI1_SK, :gsi1_sk)",
+                  "ExpressionAttributeValues": {
+                    ":gsi1_pk": {
+                      "S": "PRODUCT"
+                    },
+                    ":gsi1_sk": {
+                      "S.$": "States.Format('PRODUCT#{}', $.product_id)"
+                    }
+                  }
+                },
+                "Resource": "arn:aws:states:::aws-sdk:dynamodb:query",   
+                "ResultPath": "$.payload.order_item", 
+              "Next": "get item"
+            },
+
+            "get item": {
+              "Type": "Pass",
+              "Parameters": {
+                "Item.$": "States.ArrayGetItem($.payload.order_item.Items, 0)"
+              },
+              "ResultPath": "$.payload.product",
+              "Next": "transform item data"
+            },
+
+            "transform item data": {
+              "Type": "Pass",
+              "Parameters": {
+                "quantity.$": "$.quantity",
+                "productQuantity.$": "States.StringToJson($.payload.product.Item.productQuantity.N)"
+              },
+              "ResultPath": "$.payload.data",
+              "Next": "items available?"
+            },
+
+            "items available?": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.quantity",
+                  "NumericGreaterThanPath": "$.payload.data.productQuantity",
+                  "Next": "cancel order"
+                },
+                {
+                  "Variable": "$.quantity",
+                  "NumericLessThanPath": "$.payload.data.productQuantity",
+                  "Next": "process order"
+                }
+              ]
+            },
+            "process order": {
+              "Type": "Pass",
+              "End": true
+            },
+            "cancel order": {
+              "Type": "Pass",
+              "Next": "Fail"
+            },
+            "Fail": {
+              "Type": "Fail",
+              "Error": "Invalid quatity"
+            }
+          }
+        },
+        "Next": "Parallel State"
+      },
+      
+      "Parallel State": {
+        "Type": "Parallel",
+        "Branches": [
+          {
+            "StartAt": "save order",
+            "States": {
+                "save order": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::dynamodb:putItem",
+                    "Parameters": {
+                      "TableName": "InventoryUpdates",
+                      "Item": {
+                        "PK": {
+                          "S": "ORDER"
+                        },
+                        "SK": {
+                          "S.$": "States.Format('ORDER#{}', $.key.id)"
+                        },
+                        "orderStatus": {
+                          "S": "COMPLETED"
+                        },
+                        "id": {
+                          "S.$": "$.key.id"
+                        },
+                        "userId":{
+                          "S.$":"$.payload.user_id"
+                        },
+                        "GSI1_PK": {
+                          "S.$": "States.Format('USER#{}', $.payload.user_id)"
+                        },
+                        "GSI1_SK": {
+                          "S.$": "States.Format('ORDER#{}', $.key.id)"
+                        },
+                        "createdOn": {
+                          "S.$": "$$.State.EnteredTime"
+                        }
+                      }
+                    },
+                    "Next": "SendEmail"
+                  },
+                  "SendEmail": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::aws-sdk:sesv2:sendEmail",
+                    "Parameters": {
+                      "FromEmailAddress": "fonchu.e.venyuy@gmail.com",
+                      "Destination": {
+                        "ToAddresses": ["fonchu.e.venyuy@gmail.com"]
+                      },
+                      "Content": {
+                        "Simple": {
+                          "Subject": {
+                            "Data": "Your confirmation email",
+                            "Charset": "UTF-8"
+                          },
+                          "Body": {
+                            "Text": {
+                              "Data": "Thank you for your order.",
+                              "Charset": "UTF-8"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "End": true
+                  }
+                }
+          },
+          {
+            "StartAt": "transform invemtory data",
+            "States": {
+              "transform invemtory data":{
+                "Type": "Pass",
+                "End": true
+              }
+            }
+          }
+        ],
+        "Next": "success"
+      },
+      "success": {
+        "Type": "Succeed"
+      }
+    }
+  }
